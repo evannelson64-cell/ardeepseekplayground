@@ -35,16 +35,6 @@
 			path = ardeepseekplayground;
 			sourceTree = "<group>";
 		};
-		05FD5DF0300E343D00D9C4DA /* ardeepseekplaygroundTests */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = ardeepseekplaygroundTests;
-			sourceTree = "<group>";
-		};
-		05FD5DFA300E343D00D9C4DA /* ardeepseekplaygroundUITests */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = ardeepseekplaygroundUITests;
-			sourceTree = "<group>";
-		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -76,8 +66,6 @@
 			isa = PBXGroup;
 			children = (
 				05FD5DE2300E343A00D9C4DA /* ardeepseekplayground */,
-				05FD5DF0300E343D00D9C4DA /* ardeepseekplaygroundTests */,
-				05FD5DFA300E343D00D9C4DA /* ardeepseekplaygroundUITests */,
 				05FD5DE1300E343A00D9C4DA /* Products */,
 			);
 			sourceTree = "<group>";
@@ -130,9 +118,6 @@
 			dependencies = (
 				05FD5DEF300E343D00D9C4DA /* PBXTargetDependency */,
 			);
-			fileSystemSynchronizedGroups = (
-				05FD5DF0300E343D00D9C4DA /* ardeepseekplaygroundTests */,
-			);
 			name = ardeepseekplaygroundTests;
 			packageProductDependencies = (
 			);
@@ -153,9 +138,6 @@
 			dependencies = (
 				05FD5DF9300E343D00D9C4DA /* PBXTargetDependency */,
 			);
-			fileSystemSynchronizedGroups = (
-				05FD5DFA300E343D00D9C4DA /* ardeepseekplaygroundUITests */,
-			);
 			name = ardeepseekplaygroundUITests;
 			packageProductDependencies = (
 			);
@@ -175,6 +157,7 @@
 				TargetAttributes = {
 					05FD5DDF300E343A00D9C4DA = {
 						CreatedOnToolsVersion = 16.4;
+						LastSwiftMigration = 1640;
 					};
 					05FD5DEC300E343D00D9C4DA = {
 						CreatedOnToolsVersion = 16.4;
@@ -395,6 +378,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = T7UN6689HC;
@@ -415,6 +399,8 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.evannelson.ardeepseekplayground;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "ardeepseekplayground/ardeepseekplayground-Bridging-Header.h";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -425,6 +411,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = T7UN6689HC;
@@ -445,6 +432,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.evannelson.ardeepseekplayground;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "ardeepseekplayground/ardeepseekplayground-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};

@@ -1,4 +1,3 @@
-
 import SwiftUI
 import RealityKit
 import ARKit
@@ -11,6 +10,7 @@ struct ContentView: View {
         ZStack(alignment: .top) {
             ARViewContainer(placedEntity: $placedEntity)
                 .edgesIgnoringSafeArea(.all)
+
             VStack(spacing: 0) {
                 HStack {
                     TextField("Search Sketchfab...", text: $vm.query)
@@ -23,7 +23,6 @@ struct ContentView: View {
                 .background(.ultraThinMaterial)
 
                 if !vm.models.isEmpty {
-
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
                             ForEach(vm.models) { model in
@@ -70,7 +69,6 @@ struct ContentView: View {
         .onChange(of: vm.selectedEntity) { oldValue, newValue in
             if let entity = newValue {
                 placedEntity = entity
-                print("✅ placedEntity updated with new model")
             }
         }
     }
@@ -84,13 +82,6 @@ struct ARViewContainer: UIViewRepresentable {
         let config = ARWorldTrackingConfiguration()
         config.planeDetection = [.horizontal]
         arView.session.run(config)
-
-        // Coaching overlay to help the user find a plane
-        let coachingOverlay = ARCoachingOverlayView()
-        coachingOverlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        coachingOverlay.session = arView.session
-        coachingOverlay.goal = .horizontalPlane
-        arView.addSubview(coachingOverlay)
 
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
         arView.addGestureRecognizer(tap)
@@ -108,41 +99,18 @@ struct ARViewContainer: UIViewRepresentable {
         init(_ parent: ARViewContainer) { self.parent = parent }
 
         @objc func handleTap(_ recognizer: UITapGestureRecognizer) {
-            guard let arView = recognizer.view as? ARView else {
-                print("❌ Tap not in ARView")
-                return
-            }
-
-            guard let model = parent.placedEntity else {
-                print("❌ No placedEntity available – download a model first")
-                return
-            }
+            guard let arView = recognizer.view as? ARView,
+                  let model = parent.placedEntity?.clone(recursive: true) else { return }
 
             let location = recognizer.location(in: arView)
             let results = arView.raycast(from: location, allowing: .estimatedPlane, alignment: .horizontal)
-
-            guard let firstHit = results.first else {
-                print("❌ Raycast missed – move the device to detect a horizontal surface")
-                return
+            if let firstHit = results.first {
+                let anchor = AnchorEntity(world: firstHit.worldTransform)
+                model.generateCollisionShapes(recursive: true)
+                anchor.addChild(model)
+                arView.scene.addAnchor(anchor)
+                arView.installGestures([.scale, .translation], for: model)
             }
-
-            let clone = model.clone(recursive: true)
-            clone.generateCollisionShapes(recursive: true)
-
-            // If the model is extremely tiny, scale it up so it's visible
-            if clone.visualBounds(relativeTo: nil).boundingRadius < 0.01 {
-                clone.scale = SIMD3<Float>(0.5, 0.5, 0.5)
-                print("ℹ️ Model was tiny – scaled up to 0.5")
-            }
-
-            let anchor = AnchorEntity(world: firstHit.worldTransform)
-            anchor.addChild(clone)
-            arView.scene.addAnchor(anchor)
-
-            // Enable pinch-to-resize, pan-to-move, and two-finger rotation
-            arView.installGestures([.scale, .translation, .rotation], for: clone)
-
-            print("✅ Model placed with full gestures (scale, translate, rotate)")
         }
     }
 }
