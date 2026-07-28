@@ -171,10 +171,11 @@ struct CreateFlashCardView: View {
                             }
                         }
                     }
-
-                if displaySize != .zero {
-                    cropOverlay(canvasSize: displaySize)
-                }
+                    .overlay {
+                        if displaySize != .zero {
+                            cropOverlay(canvasSize: displaySize)
+                        }
+                    }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -290,46 +291,27 @@ struct CreateFlashCardView: View {
     private func confirmCrop() {
         guard let image = capturedImage else { return }
         let imgSize = image.size
-        let dispSize = displaySize
-        guard dispSize.width > 0, dispSize.height > 0 else { return }
+        guard displaySize.width > 0, displaySize.height > 0 else { return }
 
-        // Convert from display-normalized coords to image pixel coords,
-        // accounting for scaledToFit() letterboxing/pillarboxing.
-        let imageAspect = imgSize.width / imgSize.height
-        let displayAspect = dispSize.width / dispSize.height
+        // cropRect is normalized (0-1) relative to displaySize.
+        // The image fills the entire Image view via scaledToFit(),
+        // so displaySize maps directly to image pixels.
+        let cropInPixels = CGRect(
+            x: cropRect.origin.x * imgSize.width,
+            y: cropRect.origin.y * imgSize.height,
+            width: cropRect.size.width * imgSize.width,
+            height: cropRect.size.height * imgSize.height
+        )
 
-        let contentRect: CGRect
-        if imageAspect > displayAspect {
-            let h = dispSize.width / imageAspect
-            contentRect = CGRect(x: 0, y: (dispSize.height - h) / 2, width: dispSize.width, height: h)
-        } else {
-            let w = dispSize.height * imageAspect
-            contentRect = CGRect(x: (dispSize.width - w) / 2, y: 0, width: w, height: dispSize.height)
+        // Camera images have orientation metadata — cgImage.cropping(to:)
+        // uses the un-oriented CGImage coordinate system, giving wrong results.
+        // UIGraphicsImageRenderer respects UIImage orientation.
+        let renderer = UIGraphicsImageRenderer(size: cropInPixels.size)
+        let croppedImage = renderer.image { ctx in
+            image.draw(at: CGPoint(x: -cropInPixels.origin.x, y: -cropInPixels.origin.y))
         }
 
-        // Crop rect in display points
-        let cropInDisplay = CGRect(
-            x: cropRect.origin.x * dispSize.width,
-            y: cropRect.origin.y * dispSize.height,
-            width: cropRect.size.width * dispSize.width,
-            height: cropRect.size.height * dispSize.height
-        )
-
-        // Clamp to actual image content, convert to pixel coords
-        let clamped = cropInDisplay.intersection(contentRect)
-        guard !clamped.isNull else { return }
-
-        let cropInPixels = CGRect(
-            x: (clamped.origin.x - contentRect.origin.x) / contentRect.width * imgSize.width,
-            y: (clamped.origin.y - contentRect.origin.y) / contentRect.height * imgSize.height,
-            width: clamped.width / contentRect.width * imgSize.width,
-            height: clamped.height / contentRect.height * imgSize.height
-        )
-
-        guard let cgImage = image.cgImage,
-              let cropped = cgImage.cropping(to: cropInPixels) else { return }
-
-        croppedPreviewImage = UIImage(cgImage: cropped)
+        croppedPreviewImage = croppedImage
         withAnimation { step = .preview }
     }
 

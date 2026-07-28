@@ -307,22 +307,20 @@ struct ARFlashCardContainer: UIViewRepresentable {
 
                 if let entity = entity {
                     let clone = entity.clone(recursive: true)
-                    clone.scale *= SIMD3<Float>(repeating: card.modelScale)
 
-                    // Apply the user-adjustable Y-axis rotation
-                    let userRotationRad = card.modelRotationDegrees * .pi / 180
-                    clone.transform.rotation *= simd_quatf(angle: userRotationRad, axis: [0, 1, 0])
-
-                    // Apply vertical offset
-                    clone.position.y += card.modelVerticalOffset
+                    // Set absolute adjustments — do NOT compound with *= or +=
+                    // because saveAllPositions captures the absolute value after
+                    // gestures, and re-multiplying with the model's inherent
+                    // transform would compound and cause tiny/scaled results.
+                    clone.scale = SIMD3<Float>(repeating: card.modelScale)
+                    clone.transform.rotation = simd_quatf(angle: card.modelRotationDegrees * .pi / 180, axis: [0, 1, 0])
+                    clone.position = SIMD3<Float>(card.modelHorizontalOffset.x,
+                                                  card.modelVerticalOffset,
+                                                  card.modelHorizontalOffset.y)
 
                     // Auto-scale tiny models
                     let bounds = clone.visualBounds(relativeTo: nil)
                     if bounds.boundingRadius < 0.001 { clone.scale *= 0.5 }
-
-                    // Apply any saved horizontal offset
-                    clone.position.x = card.modelHorizontalOffset.x
-                    clone.position.z = card.modelHorizontalOffset.y
 
                     contentEntity.addChild(clone)
                     modelEntities[imgName] = clone
