@@ -25,9 +25,14 @@ struct CreateFlashCardView: View {
                 }
         }
         .fullScreenCover(isPresented: $showCamera) {
+            // CameraView passes the image back – it does NOT dismiss itself.
             CameraView { image in
                 capturedImage = image
-                showCrop = true
+                showCamera = false
+                // Let the camera cover fully dismiss before showing crop
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    showCrop = true
+                }
             }
         }
         .fullScreenCover(isPresented: $showCrop) {
