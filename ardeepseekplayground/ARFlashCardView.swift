@@ -88,8 +88,14 @@ struct ARFlashCardContainer: UIViewRepresentable {
 
         // MARK: Image Detected
 
+        nonisolated func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
+            Task { @MainActor in
+                await handleDidAdd(anchors: anchors)
+            }
+        }
+
         @MainActor
-        func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
+        private func handleDidAdd(anchors: [ARAnchor]) async {
             for anchor in anchors {
                 guard let imageAnchor = anchor as? ARImageAnchor,
                       let cardID = UUID(uuidString: imageAnchor.referenceImage.name ?? ""),
@@ -99,7 +105,6 @@ struct ARFlashCardContainer: UIViewRepresentable {
 
                 let anchorName = "fc_\(card.id.uuidString)"
 
-                // Don't re-place if we already placed for this anchor
                 if arView?.scene.anchors.contains(where: { $0.name == anchorName }) == true { continue }
 
                 placeModel(for: card, modelUID: modelUID, imageAnchor: imageAnchor, anchorName: anchorName)
@@ -108,17 +113,26 @@ struct ARFlashCardContainer: UIViewRepresentable {
 
         // MARK: Image Tracking Updates (6-DOF)
 
-        @MainActor
-        func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
-            guard let arView = arView else { return }
+        nonisolated func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
+            // Snapshot the transform data on the calling thread and pass it to main actor
+            var snapshots: [(simd_float4x4, String)] = []
             for anchor in anchors {
                 guard let imageAnchor = anchor as? ARImageAnchor,
                       let imgName = imageAnchor.referenceImage.name else { continue }
+                snapshots.append((imageAnchor.transform, imgName))
+            }
+            Task { @MainActor in
+                self.updateTrackedTransforms(snapshots: snapshots)
+            }
+        }
 
+        @MainActor
+        private func updateTrackedTransforms(snapshots: [(simd_float4x4, String)]) {
+            guard let arView = arView else { return }
+            for (transform, imgName) in snapshots {
                 let anchorName = "fc_\(imgName)"
-                // Find the matching anchor entity in the scene and update its transform
                 if let entity = arView.scene.anchors.first(where: { $0.name == anchorName }) {
-                    entity.transform = Transform(matrix: imageAnchor.transform)
+                    entity.transform = Transform(matrix: transform)
                 }
             }
         }
