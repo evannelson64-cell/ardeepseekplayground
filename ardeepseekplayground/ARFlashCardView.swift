@@ -86,11 +86,6 @@ struct ARFlashCardContainer: UIViewRepresentable {
             _isLoading = isLoading
         }
 
-        // MARK: - Track placed anchors for manual transform updates
-
-        /// Maps ARImageAnchor name → AnchorEntity so we can update transforms in didUpdate.
-        private var trackedAnchors: [String: AnchorEntity] = [:]
-
         // MARK: Image Detected
 
         @MainActor
@@ -102,12 +97,12 @@ struct ARFlashCardContainer: UIViewRepresentable {
                       let modelUID = card.modelUID
                 else { continue }
 
-                let anchorKey = card.id.uuidString
+                let anchorName = "fc_\(card.id.uuidString)"
 
                 // Don't re-place if we already placed for this anchor
-                if trackedAnchors[anchorKey] != nil { continue }
+                if arView?.scene.anchors.contains(where: { $0.name == anchorName }) == true { continue }
 
-                placeModel(for: card, modelUID: modelUID, imageAnchor: imageAnchor, anchorKey: anchorKey)
+                placeModel(for: card, modelUID: modelUID, imageAnchor: imageAnchor, anchorName: anchorName)
             }
         }
 
@@ -115,20 +110,23 @@ struct ARFlashCardContainer: UIViewRepresentable {
 
         @MainActor
         func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
+            guard let arView = arView else { return }
             for anchor in anchors {
                 guard let imageAnchor = anchor as? ARImageAnchor,
-                      let name = imageAnchor.referenceImage.name,
-                      let anchorEntity = trackedAnchors[name] else { continue }
-                // Update the anchor's transform to match the detected image's
-                // current position & orientation – this gives us full 6-DOF tracking.
-                anchorEntity.setTransformMatrix(imageAnchor.transform, relativeTo: nil)
+                      let imgName = imageAnchor.referenceImage.name else { continue }
+
+                let anchorName = "fc_\(imgName)"
+                // Find the matching anchor entity in the scene and update its transform
+                if let entity = arView.scene.anchors.first(where: { $0.name == anchorName }) {
+                    entity.transform = Transform(matrix: imageAnchor.transform)
+                }
             }
         }
 
         // MARK: Place Model on Image Anchor
 
         @MainActor
-        func placeModel(for card: FlashCard, modelUID: String, imageAnchor: ARImageAnchor, anchorKey: String) {
+        func placeModel(for card: FlashCard, modelUID: String, imageAnchor: ARImageAnchor, anchorName: String) {
             guard let arView = arView else { return }
 
             isLoading = true
@@ -173,19 +171,27 @@ struct ARFlashCardContainer: UIViewRepresentable {
                 // We manually update the transform in session(_:didUpdate:) to
                 // follow the image's position and rotation in real time.
                 let anchorEntity = AnchorEntity(world: imageAnchor.transform)
-                anchorEntity.name = "fc_\(card.id.uuidString)"
+                anchorEntity.name = anchorName
 
                 let clone = entity.clone(recursive: true)
 
-                // Auto-scale very tiny models
+                // Apply user adjustments: scale, rotation, vertical offset
+                clone.scale *= SIMD3<Float>(repeating: card.modelScale)
+
+                let rotationRad = card.modelRotationDegrees * .pi / 180
+                clone.transform.rotation *= simd_quatf(angle: rotationRad, axis: [0, 1, 0])
+
+                clone.position.y += card.modelVerticalOffset
+
+                // Auto-scale very tiny models (multiplied by user scale already)
                 let bounds = clone.visualBounds(relativeTo: nil)
-                if bounds.boundingRadius < 0.01 {
-                    clone.scale = SIMD3<Float>(repeating: 0.5)
+                if bounds.boundingRadius < 0.001 {
+                    clone.scale *= 0.5
                 }
 
                 anchorEntity.addChild(clone)
                 arView.scene.addAnchor(anchorEntity)
-                trackedAnchors[anchorKey] = anchorEntity
+                print("✅ Placed model '\(card.modelName ?? "?")' on tracked image")
 
                 isLoading = false
             }

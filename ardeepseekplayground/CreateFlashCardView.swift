@@ -9,6 +9,7 @@ struct CreateFlashCardView: View {
     @State private var showCamera = false
     @State private var capturedImage: UIImage?
     @State private var showPairing = false
+    @State private var showAdjust = false
     @State private var newCard: FlashCard?
 
     /// We show either the instruction page or the crop page.
@@ -59,7 +60,19 @@ struct CreateFlashCardView: View {
                 PairModelView(card: card, manager: manager)
             }
         }
+        .sheet(isPresented: $showAdjust) {
+            if let card = newCard {
+                ModelAdjustView(card: card, manager: manager)
+            }
+        }
         .onChange(of: showPairing) { _, isShowing in
+            // When pairing sheet closes, open the adjustment sheet
+            if !isShowing, newCard != nil {
+                showAdjust = true
+            }
+        }
+        .onChange(of: showAdjust) { _, isShowing in
+            // When adjustment sheet closes, we're fully done
             if !isShowing { dismiss() }
         }
     }
@@ -120,6 +133,8 @@ struct CreateFlashCardView: View {
 
     @State private var cropRect: CGRect = .init(x: 0.1, y: 0.1, width: 0.8, height: 0.8)
     @State private var displaySize: CGSize = .zero
+    /// Snapshot of cropRect when a drag begins – prevents cumulative translation jumps.
+    @State private var dragAnchor: CGRect? = nil
 
     private func inlineCropView(image: UIImage) -> some View {
         GeometryReader { geo in
@@ -185,56 +200,71 @@ struct CreateFlashCardView: View {
                 .contentShape(Rectangle())
                 .frame(width: rect.width, height: rect.height)
                 .position(x: rect.midX, y: rect.midY)
-                .gesture(
-                    DragGesture()
-                        .onChanged { val in
-                            let dx = val.translation.width / canvasSize.width
-                            let dy = val.translation.height / canvasSize.height
-                            var new = cropRect
-                            new.origin.x = max(0, min(1 - new.width, cropRect.origin.x + dx))
-                            new.origin.y = max(0, min(1 - new.height, cropRect.origin.y + dy))
-                            cropRect = new
-                        }
-                )
+                .gesture(dragCropGesture(canvasSize: canvasSize))
         }
+    }
+
+    // MARK: - Drag Gesture Helpers
+
+    /// Dragging the center moves the entire crop rect.
+    private func dragCropGesture(canvasSize: CGSize) -> some Gesture {
+        DragGesture()
+            .onChanged { val in
+                let start = dragAnchor ?? cropRect
+                dragAnchor = start
+                let dx = val.translation.width / canvasSize.width
+                let dy = val.translation.height / canvasSize.height
+                var new = start
+                new.origin.x = max(0, min(1 - new.width, start.origin.x + dx))
+                new.origin.y = max(0, min(1 - new.height, start.origin.y + dy))
+                cropRect = new
+            }
+            .onEnded { _ in dragAnchor = nil }
     }
 
     private enum Corner { case topLeft, topRight, bottomLeft, bottomRight }
 
+    /// Dragging a corner resizes the crop rect from that corner.
     private func cornerHandle(at pos: CGPoint, corner: Corner, canvasSize: CGSize) -> some View {
         Circle()
             .fill(.white)
             .frame(width: 28, height: 28)
             .overlay(Circle().stroke(Color.blue, lineWidth: 2))
             .position(pos)
-            .gesture(
-                DragGesture()
-                    .onChanged { val in
-                        let dx = val.translation.width / canvasSize.width
-                        let dy = val.translation.height / canvasSize.height
-                        var new = cropRect
+            .gesture(cornerDragGesture(corner: corner, canvasSize: canvasSize))
+    }
 
-                        switch corner {
-                        case .topLeft:
-                            new.origin.x = max(0, min(cropRect.maxX - 0.05, cropRect.origin.x + dx))
-                            new.origin.y = max(0, min(cropRect.maxY - 0.05, cropRect.origin.y + dy))
-                            new.size.width = cropRect.maxX - new.origin.x
-                            new.size.height = cropRect.maxY - new.origin.y
-                        case .topRight:
-                            new.origin.y = max(0, min(cropRect.maxY - 0.05, cropRect.origin.y + dy))
-                            new.size.width = max(0.05, min(1 - new.origin.x, cropRect.size.width + dx))
-                            new.size.height = cropRect.maxY - new.origin.y
-                        case .bottomLeft:
-                            new.origin.x = max(0, min(cropRect.maxX - 0.05, cropRect.origin.x + dx))
-                            new.size.width = cropRect.maxX - new.origin.x
-                            new.size.height = max(0.05, min(1 - cropRect.origin.y, cropRect.size.height + dy))
-                        case .bottomRight:
-                            new.size.width = max(0.05, min(1 - cropRect.origin.x, cropRect.size.width + dx))
-                            new.size.height = max(0.05, min(1 - cropRect.origin.y, cropRect.size.height + dy))
-                        }
-                        cropRect = new
-                    }
-            )
+    private func cornerDragGesture(corner: Corner, canvasSize: CGSize) -> some Gesture {
+        DragGesture()
+            .onChanged { val in
+                let start = dragAnchor ?? cropRect
+                dragAnchor = start
+                let dx = val.translation.width / canvasSize.width
+                let dy = val.translation.height / canvasSize.height
+                var new = start
+
+                switch corner {
+                case .topLeft:
+                    new.origin.x = max(0, min(start.maxX - 0.05, start.origin.x + dx))
+                    new.origin.y = max(0, min(start.maxY - 0.05, start.origin.y + dy))
+                    new.size.width  = start.maxX - new.origin.x
+                    new.size.height = start.maxY - new.origin.y
+                case .topRight:
+                    new.origin.y = max(0, min(start.maxY - 0.05, start.origin.y + dy))
+                    new.size.width  = max(0.05, min(1 - new.origin.x, start.size.width + dx))
+                    new.size.height = start.maxY - new.origin.y
+                case .bottomLeft:
+                    new.origin.x = max(0, min(start.maxX - 0.05, start.origin.x + dx))
+                    new.size.width  = start.maxX - new.origin.x
+                    new.size.height = max(0.05, min(1 - start.origin.y, start.size.height + dy))
+                case .bottomRight:
+                    new.size.width  = max(0.05, min(1 - start.origin.x, start.size.width + dx))
+                    new.size.height = max(0.05, min(1 - start.origin.y, start.size.height + dy))
+                }
+
+                cropRect = new
+            }
+            .onEnded { _ in dragAnchor = nil }
     }
 
     // MARK: - Confirm Crop

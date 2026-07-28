@@ -10,12 +10,20 @@ struct FlashCard: Codable, Identifiable {
     let imagePhysicalWidth: Float         // metres – ARKit needs the real-world width
     var modelUID: String?
     var modelName: String?
+    var modelScale: Float = 1.0           // relative to original size
+    var modelRotationDegrees: Float = 0   // around Y axis
+    var modelVerticalOffset: Float = 0    // metres above the tracked image
     let createdAt: Date
 
-    init(imageFileName: String, imagePhysicalWidth: Float = 0.15) {
+    init(imageFileName: String, imagePhysicalWidth: Float = 0.15,
+         modelScale: Float = 1.0, modelRotationDegrees: Float = 0,
+         modelVerticalOffset: Float = 0) {
         self.id = UUID()
         self.imageFileName = imageFileName
         self.imagePhysicalWidth = imagePhysicalWidth
+        self.modelScale = modelScale
+        self.modelRotationDegrees = modelRotationDegrees
+        self.modelVerticalOffset = modelVerticalOffset
         self.createdAt = Date()
     }
 }
@@ -83,6 +91,14 @@ class FlashCardManager: ObservableObject {
         guard let idx = flashcards.firstIndex(where: { $0.id == cardID }) else { return }
         flashcards[idx].modelUID = modelUID
         flashcards[idx].modelName = modelName
+        save()
+    }
+
+    func updateAdjustments(for cardID: UUID, scale: Float, rotationDegrees: Float, verticalOffset: Float) {
+        guard let idx = flashcards.firstIndex(where: { $0.id == cardID }) else { return }
+        flashcards[idx].modelScale = scale
+        flashcards[idx].modelRotationDegrees = rotationDegrees
+        flashcards[idx].modelVerticalOffset = verticalOffset
         save()
     }
 

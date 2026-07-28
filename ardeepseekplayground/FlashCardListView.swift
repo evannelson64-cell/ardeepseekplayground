@@ -5,6 +5,7 @@ struct FlashCardListView: View {
     @ObservedObject var manager: FlashCardManager
     @Environment(\.dismiss) private var dismiss
     @State private var showPairingSheet = false
+    @State private var showAdjustSheet = false
     @State private var selectedCard: FlashCard?
 
     var body: some View {
@@ -21,6 +22,11 @@ struct FlashCardListView: View {
         .sheet(isPresented: $showPairingSheet) {
             if let card = selectedCard {
                 PairModelView(card: card, manager: manager)
+            }
+        }
+        .sheet(isPresented: $showAdjustSheet) {
+            if let card = selectedCard {
+                ModelAdjustView(card: card, manager: manager)
             }
         }
     }
@@ -43,6 +49,19 @@ struct FlashCardListView: View {
                                 showPairingSheet = true
                             } label: {
                                 Label("Pair a 3D Model", systemImage: "link")
+                            }
+                        } else {
+                            Button {
+                                selectedCard = card
+                                showPairingSheet = true
+                            } label: {
+                                Label("Change Model", systemImage: "arrow.trianglehead.swap")
+                            }
+                            Button {
+                                selectedCard = card
+                                showAdjustSheet = true
+                            } label: {
+                                Label("Adjust Size / Rotation", systemImage: "slider.horizontal.3")
                             }
                         }
                         Button(role: .destructive) {
