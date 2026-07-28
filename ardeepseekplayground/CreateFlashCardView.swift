@@ -11,6 +11,7 @@ struct CreateFlashCardView: View {
     @State private var showPairing = false
     @State private var showAdjust = false
     @State private var newCard: FlashCard?
+    @State private var physicalWidth: Float = 0.15
 
     /// We show either the instruction page or the crop page.
     enum Step { case instructions, crop }
@@ -157,9 +158,49 @@ struct CreateFlashCardView: View {
                 if displaySize != .zero {
                     cropOverlay(canvasSize: displaySize)
                 }
+
+                // Physical width slider overlay
+                VStack {
+                    Spacer()
+                    physicalWidthControl
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 20)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    // MARK: - Physical Width
+
+    private var physicalWidthControl: some View {
+        VStack(spacing: 4) {
+            HStack {
+                Image(systemName: "ruler")
+                    .font(.caption)
+                Text("Real-world width: \(physicalWidth, specifier: "%.0f") cm")
+                    .font(.caption.bold())
+                Spacer()
+            }
+            .foregroundColor(.white)
+
+            Slider(value: $physicalWidth, in: 0.03...0.50, step: 0.01)
+                .tint(.blue)
+                .padding(.horizontal, 4)
+
+            HStack {
+                Text("3 cm")
+                    .font(.caption2)
+                    .foregroundColor(.white.opacity(0.6))
+                Spacer()
+                Text("50 cm")
+                    .font(.caption2)
+                    .foregroundColor(.white.opacity(0.6))
+            }
+        }
+        .padding(12)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     // MARK: - Crop Overlay
@@ -282,7 +323,7 @@ struct CreateFlashCardView: View {
               let cropped = cgImage.cropping(to: cropNorm) else { return }
 
         let croppedImage = UIImage(cgImage: cropped)
-        if let card = manager.createFlashCard(image: croppedImage) {
+        if let card = manager.createFlashCard(image: croppedImage, physicalWidth: physicalWidth) {
             newCard = card
             showPairing = true
         }

@@ -9,10 +9,11 @@ struct ARFlashCardView: View {
     @ObservedObject var manager: FlashCardManager
     @Environment(\.dismiss) private var dismiss
     @State private var isLoadingModel = false
+    @State private var errorMessage: String?
 
     var body: some View {
         ZStack {
-            ARFlashCardContainer(manager: manager, isLoading: $isLoadingModel)
+            ARFlashCardContainer(manager: manager, isLoading: $isLoadingModel, errorMessage: $errorMessage)
                 .edgesIgnoringSafeArea(.all)
 
             VStack {
@@ -42,6 +43,11 @@ struct ARFlashCardView: View {
                 }
             }
         }
+        .alert("Model Error", isPresented: .constant(errorMessage != nil)) {
+            Button("OK") { errorMessage = nil }
+        } message: {
+            Text(errorMessage ?? "")
+        }
     }
 }
 
@@ -50,6 +56,7 @@ struct ARFlashCardView: View {
 struct ARFlashCardContainer: UIViewRepresentable {
     @ObservedObject var manager: FlashCardManager
     @Binding var isLoading: Bool
+    @Binding var errorMessage: String?
 
     func makeUIView(context: Context) -> ARView {
         let arView = ARView(frame: .zero)
@@ -60,7 +67,7 @@ struct ARFlashCardContainer: UIViewRepresentable {
     func updateUIView(_: ARView, context: Context) {}
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(manager: manager, isLoading: $isLoading)
+        Coordinator(manager: manager, isLoading: $isLoading, errorMessage: $errorMessage)
     }
 
     // MARK: - Coordinator
@@ -68,14 +75,19 @@ struct ARFlashCardContainer: UIViewRepresentable {
     class Coordinator: NSObject {
         let manager: FlashCardManager
         @Binding var isLoading: Bool
+        @Binding var errorMessage: String?
         var modelCache: [String: Entity] = [:]
         weak var arView: ARView?
+
+        /// Maps image anchor name → content entity whose transform is updated every frame.
+        private var contentEntities: [String: Entity] = [:]
         private var updateSubscription: (any Cancellable)?
         private let api = SketchfabAPI()
 
-        init(manager: FlashCardManager, isLoading: Binding<Bool>) {
+        init(manager: FlashCardManager, isLoading: Binding<Bool>, errorMessage: Binding<String?>) {
             self.manager = manager
             _isLoading = isLoading
+            _errorMessage = errorMessage
         }
 
         @MainActor
@@ -84,15 +96,14 @@ struct ARFlashCardContainer: UIViewRepresentable {
 
             // Configure image tracking
             let config = ARImageTrackingConfiguration()
+
             config.trackingImages = manager.makeReferenceImages()
             config.maximumNumberOfTrackedImages = manager.flashcards.count
+
             arView.session.delegate = self
             arView.session.run(config, options: [.resetTracking, .removeExistingAnchors])
 
             // ── Per-frame update subscription ──
-            // This fires every frame on the main thread and polls the
-            // current AR frame's anchors – much more reliable than
-            // ARSessionDelegate for keeping transforms in sync.
             updateSubscription = arView.scene.subscribe(to: SceneEvents.Update.self) {
                 [weak self] _ in
                 self?.onFrameUpdate()
@@ -109,69 +120,77 @@ struct ARFlashCardContainer: UIViewRepresentable {
                 guard let imageAnchor = anchor as? ARImageAnchor,
                       let imgName = imageAnchor.referenceImage.name else { continue }
 
-                let anchorName = "fc_\(imgName)"
-                if let entity = arView.scene.anchors.first(where: { $0.name == anchorName }) {
-                    entity.transform = Transform(matrix: imageAnchor.transform)
+                // Update the content entity's transform to match the current image anchor.
+                // The content entity is a child of a fixed AnchorEntity(world: .identity),
+                // so its local transform equals the world transform.
+                if let content = contentEntities[imgName] {
+                    content.transform = Transform(matrix: imageAnchor.transform)
                 }
             }
         }
 
         // MARK: Image Detected (via delegate)
 
-        nonisolated func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
-            Task { @MainActor in
-                await handleDidAdd(anchors: anchors)
-            }
-        }
-
-        @MainActor
-        private func handleDidAdd(anchors: [ARAnchor]) async {
+        func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
+            // ARKit calls this on a background thread, but models/managers are @MainActor.
+            // Gather the raw anchor data on this thread, then dispatch to main actor for processing.
+            var rawAnchors: [(ARImageAnchor, String)] = []
             for anchor in anchors {
                 guard let imageAnchor = anchor as? ARImageAnchor,
-                      let cardID = UUID(uuidString: imageAnchor.referenceImage.name ?? ""),
-                      let card = manager.flashcards.first(where: { $0.id == cardID }),
-                      let modelUID = card.modelUID
-                else { continue }
+                      let name = imageAnchor.referenceImage.name else { continue }
+                rawAnchors.append((imageAnchor, name))
+            }
 
-                let anchorName = "fc_\(card.id.uuidString)"
+            Task { @MainActor in
+                for (imageAnchor, imgName) in rawAnchors {
+                    guard let cardID = UUID(uuidString: imgName),
+                          let card = manager.flashcards.first(where: { $0.id == cardID }),
+                          let modelUID = card.modelUID
+                    else { continue }
 
-                // Don't re-place if already placed
-                if arView?.scene.anchors.contains(where: { $0.name == anchorName }) == true { continue }
+                    let anchorName = "fc_\(card.id.uuidString)"
 
-                placeModel(for: card, modelUID: modelUID, imageAnchor: imageAnchor, anchorName: anchorName)
+                    // Check if we already have a hidden content entity for this image
+                    // (hidden by didRemove when tracking was lost).
+                    if let existing = contentEntities[imgName] {
+                        // Re-enable it and snap to the current image transform
+                        existing.isEnabled = true
+                        existing.transform = Transform(matrix: imageAnchor.transform)
+                    } else {
+                        placeModel(for: card, modelUID: modelUID, imageAnchor: imageAnchor,
+                                   anchorName: anchorName, imgName: imgName)
+                    }
+                }
             }
         }
 
         // MARK: Place Model
 
         @MainActor
-        func placeModel(for card: FlashCard, modelUID: String, imageAnchor: ARImageAnchor, anchorName: String) {
+        func placeModel(for card: FlashCard, modelUID: String,
+                        imageAnchor: ARImageAnchor, anchorName: String, imgName: String) {
             guard let arView = arView else { return }
 
-            // ── DEBUG: Place a red sphere first to verify tracking ──
-            let sphere = ModelEntity(
-                mesh: .generateSphere(radius: 0.03),
-                materials: [SimpleMaterial(color: .red, isMetallic: false)]
-            )
-            let stem = ModelEntity(
-                mesh: .generateCylinder(height: 0.08, radius: 0.005),
-                materials: [SimpleMaterial(color: .white, isMetallic: false)]
-            )
-            stem.position.y = 0.04
+            // ── Root anchor at world origin ──
+            // We keep this fixed and update a *child* entity's transform every frame,
+            // avoiding the coordinate-system conflicts that happen when you set
+            // .transform directly on an AnchorEntity.
+            let rootAnchor = AnchorEntity(world: matrix_identity_float4x4)
+            rootAnchor.name = anchorName
+            arView.scene.addAnchor(rootAnchor)
 
-            let marker = Entity()
-            marker.addChild(sphere)
-            marker.addChild(stem)
-
-            let anchorEntity = AnchorEntity(world: imageAnchor.transform)
-            anchorEntity.name = anchorName
-            anchorEntity.addChild(marker)
-            arView.scene.addAnchor(anchorEntity)
-            print("🔴 DEBUG: Red marker placed at image position")
+            // ── Content entity – positioned at the image anchor's current world pose ──
+            // This is the entity whose transform we update per frame in onFrameUpdate.
+            let contentEntity = Entity()
+            contentEntity.name = "content"
+            contentEntity.transform = Transform(matrix: imageAnchor.transform)
+            rootAnchor.addChild(contentEntity)
+            contentEntities[imgName] = contentEntity
 
             // ── Load real model in background ──
             isLoading = true
-            Task {
+            Task { [weak self] in
+                guard let self = self else { return }
                 let entity: Entity?
 
                 if let cached = modelCache[modelUID] {
@@ -184,6 +203,7 @@ struct ARFlashCardContainer: UIViewRepresentable {
                     do {
                         let info = try await api.downloadInfo(for: modelUID)
                         guard let usdz = info.usdz, let url = URL(string: usdz.url) else {
+                            errorMessage = "No USDZ format available for this model"
                             isLoading = false; return
                         }
                         let (tempURL, _) = try await URLSession.shared.download(from: url)
@@ -192,7 +212,7 @@ struct ARFlashCardContainer: UIViewRepresentable {
                         modelCache[modelUID] = loaded
                         entity = loaded
                     } catch {
-                        print("Model download failed: \(error)")
+                        errorMessage = "Failed to load model: \(error.localizedDescription)"
                         isLoading = false; return
                     }
                 }
@@ -200,15 +220,20 @@ struct ARFlashCardContainer: UIViewRepresentable {
                 if let entity = entity {
                     let clone = entity.clone(recursive: true)
                     clone.scale *= SIMD3<Float>(repeating: card.modelScale)
-                    let rotationRad = card.modelRotationDegrees * .pi / 180
-                    clone.transform.rotation *= simd_quatf(angle: rotationRad, axis: [0, 1, 0])
+
+                    // Apply the user-adjustable Y-axis rotation
+                    let userRotationRad = card.modelRotationDegrees * .pi / 180
+                    clone.transform.rotation *= simd_quatf(angle: userRotationRad, axis: [0, 1, 0])
+
+                    // Apply vertical offset
                     clone.position.y += card.modelVerticalOffset
+
+                    // Auto-scale tiny models
                     let bounds = clone.visualBounds(relativeTo: nil)
                     if bounds.boundingRadius < 0.001 { clone.scale *= 0.5 }
 
-                    marker.removeFromParent()
-                    anchorEntity.addChild(clone)
-                    print("✅ Swapped to real model")
+                    contentEntity.addChild(clone)
+                    print("✅ Model placed")
                 }
                 isLoading = false
             }
@@ -219,4 +244,19 @@ struct ARFlashCardContainer: UIViewRepresentable {
 // MARK: - ARSessionDelegate conformance
 
 extension ARFlashCardContainer.Coordinator: ARSessionDelegate {
+    func session(_ session: ARSession, didRemove anchors: [ARAnchor]) {
+        // ARKit removed an anchor (image out of view for too long).
+        // Hide the content entity instead of destroying it — the model stays
+        // loaded in memory, and if the image is re-detected we skip the
+        // expensive re-download and just show it again at the new position.
+        for anchor in anchors {
+            guard let imageAnchor = anchor as? ARImageAnchor,
+                  let imgName = imageAnchor.referenceImage.name,
+                  let content = contentEntities[imgName]
+            else { continue }
+
+            // Mark as removed so didAdd knows to re-attach rather than skip
+            content.isEnabled = false
+        }
+    }
 }
