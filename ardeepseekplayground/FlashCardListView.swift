@@ -4,8 +4,10 @@ import SwiftUI
 struct FlashCardListView: View {
     @StateObject private var manager = FlashCardManager()
     @State private var showCamera = false
+    @State private var showCrop = false
     @State private var showPairing = false
     @State private var showAR = false
+    @State private var capturedImage: UIImage?
     @State private var selectedCard: FlashCard?
     @State private var justCreatedCard: FlashCard?
 
@@ -74,12 +76,20 @@ struct FlashCardListView: View {
         }
         .sheet(isPresented: $showCamera) {
             CameraCaptureView { image in
-                if let card = manager.createFlashCard(image: image) {
-                    justCreatedCard = card
-                    selectedCard = card
-                    // Show pairing sheet after a tiny delay so the sheet transition completes
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        showPairing = true
+                capturedImage = image
+                showCrop = true
+            }
+        }
+        .fullScreenCover(isPresented: $showCrop) {
+            if let image = capturedImage {
+                ImageCropView(image: image) { croppedImage in
+                    if let card = manager.createFlashCard(image: croppedImage) {
+                        justCreatedCard = card
+                        selectedCard = card
+                        // Show pairing sheet after a tiny delay
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            showPairing = true
+                        }
                     }
                 }
             }
