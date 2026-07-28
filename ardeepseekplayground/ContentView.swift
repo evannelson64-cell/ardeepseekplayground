@@ -1,24 +1,71 @@
 
 import SwiftUI
 
-/// Main tab navigation: Place mode (world tracking) and Flash Cards mode (image tracking).
+/// Single-screen layout: AR world tracking (Place) + create flashcard button.
 struct ContentView: View {
-    @State private var selectedTab = 0
+    @StateObject private var flashCardManager = FlashCardManager()
+    @State private var showCreateSheet = false
+    @State private var showFlashCardAR = false
+    @State private var showFlashCardList = false
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            PlaceView(isActiveTab: selectedTab == 0)
-                .tabItem {
-                    Label("Place", systemImage: "viewfinder")
-                }
-                .tag(0)
+        ZStack(alignment: .bottomTrailing) {
+            // Existing AR place view (always active since it's the only screen)
+            PlaceView(isActiveTab: true)
+                .edgesIgnoringSafeArea(.all)
 
-            FlashCardListView()
-                .tabItem {
-                    Label("Flash Cards", systemImage: "rectangle.on.rectangle")
+            // Bottom-right button panel
+            VStack(spacing: 12) {
+                // Flash Cards list button (appears when cards exist)
+                if !flashCardManager.flashcards.isEmpty {
+                    Button {
+                        showFlashCardList = true
+                    } label: {
+                        Label("\(flashCardManager.flashcards.count) Cards", systemImage: "rectangle.stack")
+                            .font(.subheadline)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(.ultraThinMaterial)
+                            .clipShape(Capsule())
+                    }
+
+                    Button {
+                        showFlashCardAR = true
+                    } label: {
+                        Label("AR View", systemImage: "arkit")
+                            .font(.subheadline)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(.blue)
+                            .foregroundColor(.white)
+                            .clipShape(Capsule())
+                    }
                 }
-                .tag(1)
+
+                // Main create button
+                Button {
+                    showCreateSheet = true
+                } label: {
+                    Label("Create Flash Card", systemImage: "camera.fill")
+                        .font(.headline)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 14)
+                        .background(.blue)
+                        .foregroundColor(.white)
+                        .clipShape(Capsule())
+                        .shadow(radius: 4)
+                }
+            }
+            .padding()
         }
-        .tint(.blue)
+        .fullScreenCover(isPresented: $showCreateSheet) {
+            CreateFlashCardView(manager: flashCardManager)
+        }
+        .fullScreenCover(isPresented: $showFlashCardAR) {
+            ARFlashCardView(manager: flashCardManager)
+        }
+        .sheet(isPresented: $showFlashCardList) {
+            FlashCardListView(manager: flashCardManager)
+        }
     }
 }

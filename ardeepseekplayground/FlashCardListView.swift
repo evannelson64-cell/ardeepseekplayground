@@ -1,125 +1,27 @@
 import SwiftUI
 
-/// Main list of flashcards – capture, pair, and launch AR.
+/// List of flashcards – view, pair/unpair, and manage.
 struct FlashCardListView: View {
-    @StateObject private var manager = FlashCardManager()
-    @State private var showCreateSheet = false
-    @State private var showAR = false
+    @ObservedObject var manager: FlashCardManager
+    @Environment(\.dismiss) private var dismiss
     @State private var showPairingSheet = false
     @State private var selectedCard: FlashCard?
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                if manager.flashcards.isEmpty {
-                    emptyState
-                } else {
-                    cardList
-                }
-            }
-            .navigationTitle("Flash Cards")
-            .toolbar {
-                if !manager.flashcards.isEmpty {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button {
-                            showCreateSheet = true
-                        } label: {
-                            Label("Add Flashcard", systemImage: "plus")
-                        }
+            cardList
+                .navigationTitle("My Flash Cards")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Done") { dismiss() }
                     }
                 }
-            }
-
-            // Bottom bar – View in AR
-            if !manager.flashcards.isEmpty {
-                VStack(spacing: 0) {
-                    Divider()
-                    Button {
-                        showAR = true
-                    } label: {
-                        Label("View in AR", systemImage: "arkit")
-                            .font(.headline)
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(.blue)
-                            .foregroundColor(.white)
-                    }
-                }
-            }
-        }
-        .fullScreenCover(isPresented: $showCreateSheet) {
-            CreateFlashCardView(manager: manager)
         }
         .sheet(isPresented: $showPairingSheet) {
             if let card = selectedCard {
                 PairModelView(card: card, manager: manager)
             }
-        }
-        .fullScreenCover(isPresented: $showAR) {
-            ARFlashCardView(manager: manager)
-        }
-    }
-
-    // MARK: - Empty State
-
-    private var emptyState: some View {
-        VStack(spacing: 24) {
-            Spacer()
-
-            Image(systemName: "camera.viewfinder")
-                .font(.system(size: 64))
-                .foregroundColor(.blue)
-
-            VStack(spacing: 8) {
-                Text("AR Flashcards")
-                    .font(.title2.bold())
-                Text("Create your first one!")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-            }
-
-            VStack(alignment: .leading, spacing: 16) {
-                stepRow(number: "1", icon: "camera.fill",     text: "Take a photo of a picture or object")
-                stepRow(number: "2", icon: "crop",            text: "Crop to the area you want tracked")
-                stepRow(number: "3", icon: "magnifyingglass", text: "Pick a 3D model from Sketchfab")
-                stepRow(number: "4", icon: "arkit",           text: "Point your camera at the photo and watch it come to life!")
-            }
-            .padding(.horizontal, 32)
-
-            Button {
-                showCreateSheet = true
-            } label: {
-                Label("Take a Photo", systemImage: "camera.fill")
-                    .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(.blue)
-                    .foregroundColor(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-            }
-            .padding(.horizontal, 32)
-
-            Spacer()
-        }
-    }
-
-    private func stepRow(number: String, icon: String, text: String) -> some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(.blue.opacity(0.1))
-                    .frame(width: 32, height: 32)
-                Text(number)
-                    .font(.caption.bold())
-                    .foregroundColor(.blue)
-            }
-            Image(systemName: icon)
-                .font(.caption)
-                .foregroundColor(.blue)
-                .frame(width: 16)
-            Text(text)
-                .font(.subheadline)
-                .foregroundColor(.secondary)
         }
     }
 
