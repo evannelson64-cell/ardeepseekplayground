@@ -1,48 +1,57 @@
 import SwiftUI
-import AVFoundation
 
 /// Full-screen creation flow: take a photo → crop → pair a 3D model.
-/// Uses a custom AVFoundation camera view so it works independently of ARKit.
+/// Crop is shown inline (not a separate presented view) to avoid presentation issues.
 struct CreateFlashCardView: View {
     @ObservedObject var manager: FlashCardManager
     @Environment(\.dismiss) private var dismiss
 
     @State private var showCamera = false
     @State private var capturedImage: UIImage?
-    @State private var showCrop = false
     @State private var showPairing = false
     @State private var newCard: FlashCard?
 
+    /// We show either the instruction page or the crop page.
+    enum Step { case instructions, crop }
+    @State private var step: Step = .instructions
+
     var body: some View {
         NavigationStack {
-            takePhotoView
-                .navigationTitle("New Flash Card")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") { dismiss() }
+            ZStack {
+                switch step {
+                case .instructions:
+                    instructionsView
+                        .transition(.opacity)
+                case .crop:
+                    if let image = capturedImage {
+                        inlineCropView(image: image)
+                            .transition(.opacity)
                     }
                 }
-        }
-        .fullScreenCover(isPresented: $showCamera) {
-            // CameraView passes the image back – it does NOT dismiss itself.
-            CameraView { image in
-                capturedImage = image
-                showCamera = false
-                // Let the camera cover fully dismiss before showing crop
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                    showCrop = true
+            }
+            .animation(.default, value: step)
+            .navigationTitle(step == .instructions ? "New Flash Card" : "Crop Tracking Area")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                if step == .crop {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Use Photo") {
+                            confirmCrop()
+                        }
+                        .fontWeight(.semibold)
+                    }
                 }
             }
         }
-        .fullScreenCover(isPresented: $showCrop) {
-            if let image = capturedImage {
-                ImageCropView(image: image) { croppedImage in
-                    if let card = manager.createFlashCard(image: croppedImage) {
-                        newCard = card
-                        showPairing = true
-                    }
-                }
+        .fullScreenCover(isPresented: $showCamera) {
+            CameraView { image in
+                capturedImage = image
+                showCamera = false
+                // Switch to the inline crop view
+                step = .crop
             }
         }
         .sheet(isPresented: $showPairing) {
@@ -55,13 +64,11 @@ struct CreateFlashCardView: View {
         }
     }
 
-    // MARK: - Take Photo View
+    // MARK: - Instructions
 
-    private var takePhotoView: some View {
+    private var instructionsView: some View {
         VStack(spacing: 32) {
             Spacer()
-
-            // Icon
             ZStack {
                 Circle()
                     .fill(.blue.opacity(0.1))
@@ -70,20 +77,15 @@ struct CreateFlashCardView: View {
                     .font(.system(size: 44))
                     .foregroundColor(.blue)
             }
-
-            // Instructions
             VStack(spacing: 12) {
                 Text("Take a picture of your flashcard")
                     .font(.title3.bold())
-
                 Text("Point your camera at a photo, sticker, or any flat image you want to track in AR.")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
             }
-
-            // Tips
             VStack(alignment: .leading, spacing: 8) {
                 tipRow(icon: "sparkles", text: "Good lighting helps ARKit detect the image faster")
                 tipRow(icon: "rectangle.and.hand.point.up.left", text: "Keep the image flat and well-framed")
@@ -93,10 +95,7 @@ struct CreateFlashCardView: View {
             .background(.gray.opacity(0.08))
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .padding(.horizontal, 32)
-
             Spacer()
-
-            // Take Photo button
             Button {
                 showCamera = true
             } label: {
@@ -113,8 +112,149 @@ struct CreateFlashCardView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 14))
             }
             .padding(.horizontal, 32)
-
             Spacer().frame(height: 32)
+        }
+    }
+
+    // MARK: - Inline Crop
+
+    @State private var cropRect: CGRect = .init(x: 0.1, y: 0.1, width: 0.8, height: 0.8)
+    @State private var displaySize: CGSize = .zero
+
+    private func inlineCropView(image: UIImage) -> some View {
+        GeometryReader { geo in
+            ZStack {
+                Color.black.ignoresSafeArea()
+
+                let displayW = geo.size.width
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: displayW)
+                    .overlay(alignment: .topLeading) {
+                        GeometryReader { imgGeo in
+                            Color.clear.onAppear {
+                                displaySize = imgGeo.size
+                            }
+                        }
+                    }
+
+                if displaySize != .zero {
+                    cropOverlay(canvasSize: displaySize)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    // MARK: - Crop Overlay
+
+    private func cropOverlay(canvasSize: CGSize) -> some View {
+        let rect = CGRect(
+            x: cropRect.origin.x * canvasSize.width,
+            y: cropRect.origin.y * canvasSize.height,
+            width: cropRect.size.width * canvasSize.width,
+            height: cropRect.size.height * canvasSize.height
+        )
+
+        return ZStack {
+            // Semi-transparent mask
+            Color.black.opacity(0.5)
+                .overlay(
+                    Rectangle()
+                        .blendMode(.destinationOut)
+                        .frame(width: rect.width, height: rect.height)
+                        .position(x: rect.midX, y: rect.midY)
+                )
+                .compositingGroup()
+
+            // Border
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(.white, lineWidth: 2)
+                .frame(width: rect.width, height: rect.height)
+                .position(x: rect.midX, y: rect.midY)
+
+            // Corner handles
+            cornerHandle(at: CGPoint(x: rect.minX, y: rect.minY), corner: .topLeft, canvasSize: canvasSize)
+            cornerHandle(at: CGPoint(x: rect.maxX, y: rect.minY), corner: .topRight, canvasSize: canvasSize)
+            cornerHandle(at: CGPoint(x: rect.minX, y: rect.maxY), corner: .bottomLeft, canvasSize: canvasSize)
+            cornerHandle(at: CGPoint(x: rect.maxX, y: rect.maxY), corner: .bottomRight, canvasSize: canvasSize)
+
+            // Drag area in center to move the whole crop
+            Color.clear
+                .contentShape(Rectangle())
+                .frame(width: rect.width, height: rect.height)
+                .position(x: rect.midX, y: rect.midY)
+                .gesture(
+                    DragGesture()
+                        .onChanged { val in
+                            let dx = val.translation.width / canvasSize.width
+                            let dy = val.translation.height / canvasSize.height
+                            var new = cropRect
+                            new.origin.x = max(0, min(1 - new.width, cropRect.origin.x + dx))
+                            new.origin.y = max(0, min(1 - new.height, cropRect.origin.y + dy))
+                            cropRect = new
+                        }
+                )
+        }
+    }
+
+    private enum Corner { case topLeft, topRight, bottomLeft, bottomRight }
+
+    private func cornerHandle(at pos: CGPoint, corner: Corner, canvasSize: CGSize) -> some View {
+        Circle()
+            .fill(.white)
+            .frame(width: 28, height: 28)
+            .overlay(Circle().stroke(Color.blue, lineWidth: 2))
+            .position(pos)
+            .gesture(
+                DragGesture()
+                    .onChanged { val in
+                        let dx = val.translation.width / canvasSize.width
+                        let dy = val.translation.height / canvasSize.height
+                        var new = cropRect
+
+                        switch corner {
+                        case .topLeft:
+                            new.origin.x = max(0, min(cropRect.maxX - 0.05, cropRect.origin.x + dx))
+                            new.origin.y = max(0, min(cropRect.maxY - 0.05, cropRect.origin.y + dy))
+                            new.size.width = cropRect.maxX - new.origin.x
+                            new.size.height = cropRect.maxY - new.origin.y
+                        case .topRight:
+                            new.origin.y = max(0, min(cropRect.maxY - 0.05, cropRect.origin.y + dy))
+                            new.size.width = max(0.05, min(1 - new.origin.x, cropRect.size.width + dx))
+                            new.size.height = cropRect.maxY - new.origin.y
+                        case .bottomLeft:
+                            new.origin.x = max(0, min(cropRect.maxX - 0.05, cropRect.origin.x + dx))
+                            new.size.width = cropRect.maxX - new.origin.x
+                            new.size.height = max(0.05, min(1 - cropRect.origin.y, cropRect.size.height + dy))
+                        case .bottomRight:
+                            new.size.width = max(0.05, min(1 - cropRect.origin.x, cropRect.size.width + dx))
+                            new.size.height = max(0.05, min(1 - cropRect.origin.y, cropRect.size.height + dy))
+                        }
+                        cropRect = new
+                    }
+            )
+    }
+
+    // MARK: - Confirm Crop
+
+    private func confirmCrop() {
+        guard let image = capturedImage else { return }
+        let imgSize = image.size
+        let cropNorm = CGRect(
+            x: cropRect.origin.x * imgSize.width,
+            y: cropRect.origin.y * imgSize.height,
+            width: cropRect.size.width * imgSize.width,
+            height: cropRect.size.height * imgSize.height
+        )
+        guard let cgImage = image.cgImage,
+              let cropped = cgImage.cropping(to: cropNorm) else { return }
+
+        let croppedImage = UIImage(cgImage: cropped)
+        if let card = manager.createFlashCard(image: croppedImage) {
+            newCard = card
+            showPairing = true
         }
     }
 
