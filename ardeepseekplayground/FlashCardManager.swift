@@ -110,7 +110,7 @@ class FlashCardManager: ObservableObject {
         for card in flashcards {
             guard let uiImage = loadImage(named: card.imageFileName),
                   let cgImage = uiImage.cgImage else { continue }
-            let refImage = ARReferenceImage(cgImage, orientation: .up, physicalWidth: card.imagePhysicalWidth)
+            let refImage = ARReferenceImage(cgImage, orientation: .up, physicalWidth: CGFloat(card.imagePhysicalWidth))
             refImage.name = card.id.uuidString
             refImages.insert(refImage)
         }

@@ -86,8 +86,14 @@ struct ARFlashCardContainer: UIViewRepresentable {
             _isLoading = isLoading
         }
 
+        // MARK: - Track placed anchors for manual transform updates
+
+        /// Maps ARImageAnchor name → AnchorEntity so we can update transforms in didUpdate.
+        private var trackedAnchors: [String: AnchorEntity] = [:]
+
         // MARK: Image Detected
 
+        @MainActor
         func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
             for anchor in anchors {
                 guard let imageAnchor = anchor as? ARImageAnchor,
@@ -96,21 +102,33 @@ struct ARFlashCardContainer: UIViewRepresentable {
                       let modelUID = card.modelUID
                 else { continue }
 
-                // Don't re-place if we already placed for this anchor
-                if arView?.scene.anchors.contains(where: { anchorEntity in
-                    anchorEntity.name == "fc_\(cardID.uuidString)"
-                }) == true { continue }
+                let anchorKey = card.id.uuidString
 
-                Task { @MainActor in
-                    await placeModel(for: card, modelUID: modelUID, imageAnchor: imageAnchor)
-                }
+                // Don't re-place if we already placed for this anchor
+                if trackedAnchors[anchorKey] != nil { continue }
+
+                placeModel(for: card, modelUID: modelUID, imageAnchor: imageAnchor, anchorKey: anchorKey)
+            }
+        }
+
+        // MARK: Image Tracking Updates (6-DOF)
+
+        @MainActor
+        func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
+            for anchor in anchors {
+                guard let imageAnchor = anchor as? ARImageAnchor,
+                      let name = imageAnchor.referenceImage.name,
+                      let anchorEntity = trackedAnchors[name] else { continue }
+                // Update the anchor's transform to match the detected image's
+                // current position & orientation – this gives us full 6-DOF tracking.
+                anchorEntity.setTransformMatrix(imageAnchor.transform, relativeTo: nil)
             }
         }
 
         // MARK: Place Model on Image Anchor
 
         @MainActor
-        func placeModel(for card: FlashCard, modelUID: String, imageAnchor: ARImageAnchor) {
+        func placeModel(for card: FlashCard, modelUID: String, imageAnchor: ARImageAnchor, anchorKey: String) {
             guard let arView = arView else { return }
 
             isLoading = true
@@ -151,11 +169,10 @@ struct ARFlashCardContainer: UIViewRepresentable {
                     }
                 }
 
-                // Place the entity on the image anchor
-                // AnchorEntity(anchor:) ties the entity to the ARImageAnchor automatically,
-                // giving us full 6-DOF tracking – tilt, rotate, move the photo, and the
-                // model follows exactly.
-                let anchorEntity = AnchorEntity(anchor: imageAnchor)
+                // Place the entity at the image anchor's initial world transform.
+                // We manually update the transform in session(_:didUpdate:) to
+                // follow the image's position and rotation in real time.
+                let anchorEntity = AnchorEntity(world: imageAnchor.transform)
                 anchorEntity.name = "fc_\(card.id.uuidString)"
 
                 let clone = entity.clone(recursive: true)
@@ -168,6 +185,7 @@ struct ARFlashCardContainer: UIViewRepresentable {
 
                 anchorEntity.addChild(clone)
                 arView.scene.addAnchor(anchorEntity)
+                trackedAnchors[anchorKey] = anchorEntity
 
                 isLoading = false
             }
