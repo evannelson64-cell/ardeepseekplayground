@@ -3,11 +3,9 @@ import SwiftUI
 /// Main list of flashcards – capture, pair, and launch AR.
 struct FlashCardListView: View {
     @StateObject private var manager = FlashCardManager()
-    @State private var showCamera = false
-    @State private var showCrop = false
-    @State private var showPairing = false
+    @State private var showCreateSheet = false
     @State private var showAR = false
-    @State private var capturedImage: UIImage?
+    @State private var showPairingSheet = false
     @State private var selectedCard: FlashCard?
 
     var body: some View {
@@ -24,7 +22,7 @@ struct FlashCardListView: View {
                 if !manager.flashcards.isEmpty {
                     ToolbarItem(placement: .primaryAction) {
                         Button {
-                            showCamera = true
+                            showCreateSheet = true
                         } label: {
                             Label("Add Flashcard", systemImage: "plus")
                         }
@@ -49,26 +47,10 @@ struct FlashCardListView: View {
                 }
             }
         }
-        .sheet(isPresented: $showCamera) {
-            CameraCaptureView { image in
-                capturedImage = image
-                showCrop = true
-            }
+        .fullScreenCover(isPresented: $showCreateSheet) {
+            CreateFlashCardView(manager: manager)
         }
-        .fullScreenCover(isPresented: $showCrop) {
-            if let image = capturedImage {
-                ImageCropView(image: image) { croppedImage in
-                    if let card = manager.createFlashCard(image: croppedImage) {
-                        selectedCard = card
-                        // Show pairing sheet after sheet transition
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                            showPairing = true
-                        }
-                    }
-                }
-            }
-        }
-        .sheet(isPresented: $showPairing) {
+        .sheet(isPresented: $showPairingSheet) {
             if let card = selectedCard {
                 PairModelView(card: card, manager: manager)
             }
@@ -105,7 +87,7 @@ struct FlashCardListView: View {
             .padding(.horizontal, 32)
 
             Button {
-                showCamera = true
+                showCreateSheet = true
             } label: {
                 Label("Take a Photo", systemImage: "camera.fill")
                     .font(.headline)
@@ -156,7 +138,7 @@ struct FlashCardListView: View {
                         if card.modelUID == nil {
                             Button {
                                 selectedCard = card
-                                showPairing = true
+                                showPairingSheet = true
                             } label: {
                                 Label("Pair a 3D Model", systemImage: "link")
                             }
