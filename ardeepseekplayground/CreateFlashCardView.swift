@@ -8,13 +8,14 @@ struct CreateFlashCardView: View {
 
     @State private var showCamera = false
     @State private var capturedImage: UIImage?
+    @State private var croppedPreviewImage: UIImage?
     @State private var showPairing = false
     @State private var showAdjust = false
+    @State private var showGlueView = false
     @State private var newCard: FlashCard?
-    @State private var physicalWidth: Float = 0.15
 
-    /// We show either the instruction page or the crop page.
-    enum Step { case instructions, crop }
+    /// We show either the instruction page, crop page, or glue page.
+    enum Step { case instructions, crop, preview, glue }
     @State private var step: Step = .instructions
 
     var body: some View {
@@ -29,10 +30,23 @@ struct CreateFlashCardView: View {
                         inlineCropView(image: image)
                             .transition(.opacity)
                     }
+                case .preview:
+                    if let image = croppedPreviewImage {
+                        cropPreviewView(image: image)
+                            .transition(.opacity)
+                    }
+                case .glue:
+                    // Refresh card from manager — PairModelView updated it in-place
+                    if let cardID = newCard?.id,
+                       let refreshed = manager.flashcards.first(where: { $0.id == cardID }),
+                       let img = capturedImage, let uid = refreshed.modelUID {
+                        GlueView(image: img, modelUID: uid, card: refreshed, manager: manager)
+                            .transition(.opacity)
+                    }
                 }
             }
             .animation(.default, value: step)
-            .navigationTitle(step == .instructions ? "New Flash Card" : "Crop Tracking Area")
+            .navigationTitle(step == .instructions ? "New Flash Card" : step == .crop ? "Crop Tracking Area" : step == .preview ? "Preview" : "Position Model")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -42,6 +56,14 @@ struct CreateFlashCardView: View {
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Use Photo") {
                             confirmCrop()
+                        }
+                        .fontWeight(.semibold)
+                    }
+                }
+                if step == .preview {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Looks Good!") {
+                            proceedFromPreview()
                         }
                         .fontWeight(.semibold)
                     }
@@ -67,14 +89,9 @@ struct CreateFlashCardView: View {
             }
         }
         .onChange(of: showPairing) { _, isShowing in
-            // When pairing sheet closes, open the adjustment sheet
             if !isShowing, newCard != nil {
-                showAdjust = true
+                withAnimation { step = .glue }
             }
-        }
-        .onChange(of: showAdjust) { _, isShowing in
-            // When adjustment sheet closes, we're fully done
-            if !isShowing { dismiss() }
         }
     }
 
@@ -158,49 +175,9 @@ struct CreateFlashCardView: View {
                 if displaySize != .zero {
                     cropOverlay(canvasSize: displaySize)
                 }
-
-                // Physical width slider overlay
-                VStack {
-                    Spacer()
-                    physicalWidthControl
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 20)
-                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-    }
-
-    // MARK: - Physical Width
-
-    private var physicalWidthControl: some View {
-        VStack(spacing: 4) {
-            HStack {
-                Image(systemName: "ruler")
-                    .font(.caption)
-                Text("Real-world width: \(physicalWidth, specifier: "%.0f") cm")
-                    .font(.caption.bold())
-                Spacer()
-            }
-            .foregroundColor(.white)
-
-            Slider(value: $physicalWidth, in: 0.03...0.50, step: 0.01)
-                .tint(.blue)
-                .padding(.horizontal, 4)
-
-            HStack {
-                Text("3 cm")
-                    .font(.caption2)
-                    .foregroundColor(.white.opacity(0.6))
-                Spacer()
-                Text("50 cm")
-                    .font(.caption2)
-                    .foregroundColor(.white.opacity(0.6))
-            }
-        }
-        .padding(12)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     // MARK: - Crop Overlay
@@ -313,20 +290,47 @@ struct CreateFlashCardView: View {
     private func confirmCrop() {
         guard let image = capturedImage else { return }
         let imgSize = image.size
-        let cropNorm = CGRect(
-            x: cropRect.origin.x * imgSize.width,
-            y: cropRect.origin.y * imgSize.height,
-            width: cropRect.size.width * imgSize.width,
-            height: cropRect.size.height * imgSize.height
-        )
-        guard let cgImage = image.cgImage,
-              let cropped = cgImage.cropping(to: cropNorm) else { return }
+        let dispSize = displaySize
+        guard dispSize.width > 0, dispSize.height > 0 else { return }
 
-        let croppedImage = UIImage(cgImage: cropped)
-        if let card = manager.createFlashCard(image: croppedImage, physicalWidth: physicalWidth) {
-            newCard = card
-            showPairing = true
+        // Convert from display-normalized coords to image pixel coords,
+        // accounting for scaledToFit() letterboxing/pillarboxing.
+        let imageAspect = imgSize.width / imgSize.height
+        let displayAspect = dispSize.width / dispSize.height
+
+        let contentRect: CGRect
+        if imageAspect > displayAspect {
+            let h = dispSize.width / imageAspect
+            contentRect = CGRect(x: 0, y: (dispSize.height - h) / 2, width: dispSize.width, height: h)
+        } else {
+            let w = dispSize.height * imageAspect
+            contentRect = CGRect(x: (dispSize.width - w) / 2, y: 0, width: w, height: dispSize.height)
         }
+
+        // Crop rect in display points
+        let cropInDisplay = CGRect(
+            x: cropRect.origin.x * dispSize.width,
+            y: cropRect.origin.y * dispSize.height,
+            width: cropRect.size.width * dispSize.width,
+            height: cropRect.size.height * dispSize.height
+        )
+
+        // Clamp to actual image content, convert to pixel coords
+        let clamped = cropInDisplay.intersection(contentRect)
+        guard !clamped.isNull else { return }
+
+        let cropInPixels = CGRect(
+            x: (clamped.origin.x - contentRect.origin.x) / contentRect.width * imgSize.width,
+            y: (clamped.origin.y - contentRect.origin.y) / contentRect.height * imgSize.height,
+            width: clamped.width / contentRect.width * imgSize.width,
+            height: clamped.height / contentRect.height * imgSize.height
+        )
+
+        guard let cgImage = image.cgImage,
+              let cropped = cgImage.cropping(to: cropInPixels) else { return }
+
+        croppedPreviewImage = UIImage(cgImage: cropped)
+        withAnimation { step = .preview }
     }
 
     // MARK: - Helpers
@@ -340,6 +344,66 @@ struct CreateFlashCardView: View {
             Text(text)
                 .font(.caption)
                 .foregroundColor(.secondary)
+        }
+    }
+
+    // MARK: - Crop Preview
+
+    private func cropPreviewView(image: UIImage) -> some View {
+        VStack(spacing: 24) {
+            Spacer()
+
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .shadow(radius: 4)
+                .padding(.horizontal, 40)
+
+            Text("This will be the tracked image.")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+
+            Text("Make sure only the flashcard is visible — no background.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+
+            HStack(spacing: 24) {
+                Button {
+                    withAnimation { step = .crop }
+                } label: {
+                    Label("Retake", systemImage: "arrow.trianglehead.counterclockwise")
+                        .font(.headline)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 12)
+                        .background(Color.gray.opacity(0.2))
+                        .clipShape(Capsule())
+                }
+
+                Button {
+                    proceedFromPreview()
+                } label: {
+                    Label("Looks Good!", systemImage: "hand.thumbsup.fill")
+                        .font(.headline.bold())
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 12)
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .clipShape(Capsule())
+                }
+            }
+
+            Spacer()
+        }
+    }
+
+    private func proceedFromPreview() {
+        guard let croppedImage = croppedPreviewImage else { return }
+        if let card = manager.createFlashCard(image: croppedImage) {
+            newCard = card
+            showPairing = true
         }
     }
 }

@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// List of flashcards – view, pair/unpair, and manage.
 struct FlashCardListView: View {
@@ -7,6 +8,8 @@ struct FlashCardListView: View {
     @State private var showPairingSheet = false
     @State private var showAdjustSheet = false
     @State private var selectedCard: FlashCard?
+    @State private var exportURL: URL?
+    @State private var showShareSheet = false
 
     var body: some View {
         NavigationStack {
@@ -16,6 +19,18 @@ struct FlashCardListView: View {
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("Done") { dismiss() }
+                    }
+                    ToolbarItem(placement: .automatic) {
+                        if !manager.flashcards.isEmpty {
+                            Button {
+                                if let url = manager.exportDeck() {
+                                    exportURL = url
+                                    showShareSheet = true
+                                }
+                            } label: {
+                                Label("Export", systemImage: "square.and.arrow.up")
+                            }
+                        }
                     }
                 }
         }
@@ -29,6 +44,21 @@ struct FlashCardListView: View {
                 ModelAdjustView(card: card, manager: manager)
             }
         }
+        .sheet(isPresented: $showShareSheet) {
+            if let url = exportURL {
+                ShareSheet(items: [url])
+            }
+        }
+    }
+
+    // MARK: - Share Sheet Wrapper
+
+    private struct ShareSheet: UIViewControllerRepresentable {
+        let items: [Any]
+        func makeUIViewController(context: Context) -> UIActivityViewController {
+            UIActivityViewController(activityItems: items, applicationActivities: nil)
+        }
+        func updateUIViewController(_: UIActivityViewController, context: Context) {}
     }
 
     // MARK: - Card List
