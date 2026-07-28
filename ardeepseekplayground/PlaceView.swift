@@ -5,12 +5,13 @@ import ARKit
 /// The original "Search Sketchfab & place on detected planes" view,
 /// extracted so ContentView can use a TabView.
 struct PlaceView: View {
+    let isActiveTab: Bool
     @StateObject private var vm = SearchViewModel()
     @State private var placedEntity: ModelEntity?
 
     var body: some View {
         ZStack(alignment: .top) {
-            PlaceARViewContainer(placedEntity: $placedEntity)
+            PlaceARViewContainer(placedEntity: $placedEntity, isActive: isActiveTab)
                 .edgesIgnoringSafeArea(.all)
 
             VStack(spacing: 0) {
@@ -81,6 +82,7 @@ struct PlaceView: View {
 
 struct PlaceARViewContainer: UIViewRepresentable {
     @Binding var placedEntity: ModelEntity?
+    let isActive: Bool
 
     func makeUIView(context: Context) -> ARView {
         let arView = ARView(frame: .zero)
@@ -100,7 +102,20 @@ struct PlaceARViewContainer: UIViewRepresentable {
         return arView
     }
 
-    func updateUIView(_: ARView, context: Context) {}
+    func updateUIView(_ uiView: ARView, context: Context) {
+        if isActive {
+            // Resume if paused – we track state via the coordinator
+            if context.coordinator.isPaused {
+                let config = ARWorldTrackingConfiguration()
+                config.planeDetection = [.horizontal]
+                uiView.session.run(config, options: .resetTracking)
+                context.coordinator.isPaused = false
+            }
+        } else {
+            uiView.session.pause()
+            context.coordinator.isPaused = true
+        }
+    }
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -108,6 +123,7 @@ struct PlaceARViewContainer: UIViewRepresentable {
 
     class Coordinator: NSObject {
         let parent: PlaceARViewContainer
+        var isPaused = false
         init(_ parent: PlaceARViewContainer) { self.parent = parent }
 
         @objc func handleTap(_ recognizer: UITapGestureRecognizer) {

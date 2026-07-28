@@ -7,7 +7,7 @@ struct ContentView: View {
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            PlaceView()
+            PlaceView(isActiveTab: selectedTab == 0)
                 .tabItem {
                     Label("Place", systemImage: "viewfinder")
                 }
