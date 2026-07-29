@@ -308,19 +308,30 @@ struct ARFlashCardContainer: UIViewRepresentable {
                 if let entity = entity {
                     let clone = entity.clone(recursive: true)
 
-                    // Set absolute adjustments — do NOT compound with *= or +=
-                    // because saveAllPositions captures the absolute value after
-                    // gestures, and re-multiplying with the model's inherent
-                    // transform would compound and cause tiny/scaled results.
+                    // Apply saved adjustments as absolute values.
                     clone.scale = SIMD3<Float>(repeating: card.modelScale)
                     clone.transform.rotation = simd_quatf(angle: card.modelRotationDegrees * .pi / 180, axis: [0, 1, 0])
                     clone.position = SIMD3<Float>(card.modelHorizontalOffset.x,
                                                   card.modelVerticalOffset,
                                                   card.modelHorizontalOffset.y)
 
-                    // Auto-scale tiny models
+                    // Auto-scale first-time models to a reasonable size (~5 cm radius).
+                    // Once the user gestures or auto-save runs, modelScale is persisted.
                     let bounds = clone.visualBounds(relativeTo: nil)
-                    if bounds.boundingRadius < 0.001 { clone.scale *= 0.5 }
+                    let targetRadius: Float = 0.05
+                    if card.modelScale == 1.0, bounds.boundingRadius > 0 {
+                        let autoScale = targetRadius / bounds.boundingRadius
+                        clone.scale = SIMD3<Float>(repeating: autoScale)
+                        // Persist auto-scale so subsequent loads don't re-compute
+                        // (dispatch to avoid publishing during view update).
+                        let cardID = card.id
+                        DispatchQueue.main.async {
+                            self.manager.updateAdjustments(for: cardID, scale: autoScale,
+                                                           rotationDegrees: card.modelRotationDegrees,
+                                                           verticalOffset: card.modelVerticalOffset,
+                                                           horizontalOffset: card.modelHorizontalOffset)
+                        }
+                    }
 
                     contentEntity.addChild(clone)
                     modelEntities[imgName] = clone
